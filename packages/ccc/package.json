@@ -1,0 +1,25 @@
+{
+  "name": "@unbyte/ccc",
+  "version": "0.0.1",
+  "files": [
+    "lib"
+  ],
+  "bin": {
+    "ccc": "./src/index.ts"
+  },
+  "author": {
+    "name": "unbyte",
+    "url": "https://github.com/unbyte"
+  },
+  "license": "MIT",
+  "keywords": [],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "pnpm build"
+  },
+  "publishConfig": {
+    "bin": {
+      "ccc": "./lib/index.js"
+    }
+  }
+}
