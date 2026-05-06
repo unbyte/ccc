@@ -12,7 +12,14 @@
     "url": "https://github.com/unbyte"
   },
   "license": "MIT",
-  "keywords": [],
+  "keywords": [
+    "ai",
+    "claude",
+    "claude code",
+    "config",
+    "configuration",
+    "switch"
+  ],
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "pnpm build"
