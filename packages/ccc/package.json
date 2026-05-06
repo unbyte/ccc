@@ -17,6 +17,9 @@
     "build": "tsup",
     "prepublishOnly": "pnpm build"
   },
+  "devDependencies": {
+    "valibot": "^1.4.0"
+  },
   "publishConfig": {
     "bin": {
       "ccc": "./lib/index.js"
