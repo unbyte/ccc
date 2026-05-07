@@ -33,6 +33,7 @@ const ConfigSchema = v.object({
   api: v.pipe(v.string(), v.url()),
   apiKey: v.optional(v.string()),
   default: v.optional(v.boolean()),
+  args: v.optional(v.array(v.string())),
   env: v.optional(v.record(v.string(), v.string())),
   settings: v.optional(v.record(v.string(), v.unknown())),
 })

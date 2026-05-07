@@ -33,6 +33,7 @@ Create `~/.ccc/config.json`:
     "thinking": {             // thinking config (optional)
       "effort": "high"        // low | medium | high | xhigh | max
     },
+    "args": ["--debug"],      // extra args prepended to claude (optional)
     "env": {},                // extra env vars passed to claude (optional)
     "settings": {}            // additional Claude Code settings (optional)
   }

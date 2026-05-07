@@ -16,6 +16,10 @@ function run(config: Config, _args: string[]) {
     ANTHROPIC_AUTH_TOKEN: config.apiKey || 'no-auth',
   }
 
+  if (config.args?.length) {
+    args.unshift(...config.args)
+  }
+
   if (config.models) {
     const { models } = config
     if (models.default) env.ANTHROPIC_MODEL = models.default
