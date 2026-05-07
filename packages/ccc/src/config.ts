@@ -54,6 +54,6 @@ export function parse(raw: string) {
   }
   return {
     success: false,
-    error: v.flatten(parsed.issues).nested,
+    error: v.summarize(parsed.issues),
   } as const
 }

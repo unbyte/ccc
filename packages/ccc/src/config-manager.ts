@@ -35,8 +35,7 @@ export async function load(configFile: string) {
   const parsed = parse(content)
 
   if (!parsed.success) {
-    const detail = JSON.stringify(parsed.error, null, 2)
-    throw new LoadError(['invalid config file format:', detail], configFile)
+    throw new LoadError(['invalid config file format:', parsed.error], configFile)
   }
 
   const { list } = parsed
