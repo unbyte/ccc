@@ -1,5 +1,11 @@
 # @unbyte/ccc
 
+## 0.0.3
+
+### Patch Changes
+
+- 50e21cf: feat: support the official subscription as a config
+
 ## 0.0.2
 
 ### Patch Changes
