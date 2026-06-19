@@ -20,7 +20,7 @@ Create `~/.ccc/config.json`:
 [
   {
     "id": "some-id",         // name used to select this config
-    "api": "https://api",    // provider base URL (required)
+    "api": "https://api",    // provider base URL (omit to use the official subscription)
     "apiKey": "sk-ant-...",  // API key (optional if the provider allows it)
     "default": true,         // use this config when no id is given
     "models": {              // override model selection (optional)
@@ -41,6 +41,16 @@ Create `~/.ccc/config.json`:
 ```
 
 `models` also accepts a single string as shorthand — it applies to all model slots.
+
+To use the official Claude subscription, omit `api` (and `apiKey`) — ccc leaves the
+base URL and auth token untouched so Claude Code uses its built-in login:
+
+```jsonc
+[
+  { "id": "official", "default": true },
+  { "id": "some-provider", "api": "https://api", "apiKey": "sk-ant-..." }
+]
+```
 
 Then run:
 

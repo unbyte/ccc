@@ -12,8 +12,11 @@ function run(config: Config, _args: string[]) {
   const args = [..._args]
   const env: Record<string, string | undefined> = {
     ...process.env,
-    ANTHROPIC_BASE_URL: config.api,
-    ANTHROPIC_AUTH_TOKEN: config.apiKey || 'no-auth',
+  }
+
+  if (config.api) {
+    env.ANTHROPIC_BASE_URL = config.api
+    env.ANTHROPIC_AUTH_TOKEN = config.apiKey || 'no-auth'
   }
 
   if (config.args?.length) {

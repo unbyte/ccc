@@ -30,7 +30,9 @@ const ConfigSchema = v.object({
       effort: v.optional(EffortLevelSchema),
     }),
   ),
-  api: v.pipe(v.string(), v.url()),
+  // When omitted, the official Claude subscription auth is used as-is
+  // (no base URL or auth token override).
+  api: v.optional(v.pipe(v.string(), v.url())),
   apiKey: v.optional(v.string()),
   default: v.optional(v.boolean()),
   args: v.optional(v.array(v.string())),
