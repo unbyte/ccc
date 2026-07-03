@@ -34,6 +34,9 @@ const ConfigSchema = v.object({
   // (no base URL or auth token override).
   api: v.optional(v.pipe(v.string(), v.url())),
   apiKey: v.optional(v.string()),
+  // When set, `api` is treated as an upstream of the given API shape and a
+  // local proxy translates Claude Code's requests to/from it.
+  transform: v.optional(v.picklist(['openai-completions'])),
   default: v.optional(v.boolean()),
   args: v.optional(v.array(v.string())),
   env: v.optional(v.record(v.string(), v.string())),

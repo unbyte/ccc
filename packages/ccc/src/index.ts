@@ -3,20 +3,38 @@
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { TransformServer } from '@internal/transform-server'
 import type { Config } from './config'
 import { load, pick } from './config-manager'
 
 const CONFIG_FILE = join(homedir(), '.ccc', 'config.json')
 
-function run(config: Config, _args: string[]) {
+async function run(config: Config, _args: string[]) {
   const args = [..._args]
   const env: Record<string, string | undefined> = {
     ...process.env,
   }
 
+  let closeServer: (() => Promise<void>) | undefined
+
   if (config.api) {
-    env.ANTHROPIC_BASE_URL = config.api
-    env.ANTHROPIC_AUTH_TOKEN = config.apiKey || 'no-auth'
+    if (config.transform) {
+      // Spin up a local server translating Claude Code's requests to the
+      // configured upstream, and hand its URL to Claude Code.
+      const server = TransformServer.create({
+        api: config.api,
+        apiKey: config.apiKey,
+        transform: config.transform,
+      })
+      const { url, close } = await server.listen()
+      closeServer = close
+      env.ANTHROPIC_BASE_URL = url
+      env.ANTHROPIC_AUTH_TOKEN = 'no-auth'
+      console.log('🔀 transform:', config.transform, '->', url)
+    } else {
+      env.ANTHROPIC_BASE_URL = config.api
+      env.ANTHROPIC_AUTH_TOKEN = config.apiKey || 'no-auth'
+    }
   }
 
   if (config.args?.length) {
@@ -54,12 +72,14 @@ function run(config: Config, _args: string[]) {
     env,
     stdio: 'inherit',
   })
-    .on('error', (error) => {
+    .on('error', async (error) => {
       console.error('failed to start claude code:')
       console.error(error instanceof Error ? error.message : String(error))
+      await closeServer?.()
       process.exit(1)
     })
-    .on('close', (code) => {
+    .on('close', async (code) => {
+      await closeServer?.()
       process.exit(code ?? 0)
     })
 }
@@ -84,7 +104,7 @@ async function main() {
     runArgs = args
   }
 
-  run(config, runArgs)
+  await run(config, runArgs)
 }
 
 main().catch((error) => {

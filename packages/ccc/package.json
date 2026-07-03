@@ -25,6 +25,7 @@
     "prepublishOnly": "pnpm build"
   },
   "devDependencies": {
+    "@internal/transform-server": "workspace:*",
     "valibot": "^1.4.0"
   },
   "publishConfig": {

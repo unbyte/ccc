@@ -44,9 +44,14 @@ importers:
 
   packages/ccc:
     devDependencies:
+      '@internal/transform-server':
+        specifier: workspace:*
+        version: link:../transform-server
       valibot:
         specifier: ^1.4.0
         version: 1.4.0(typescript@5.9.3)
+
+  packages/transform-server: {}
 
 packages:
 
