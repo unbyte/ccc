@@ -1,8 +1,8 @@
 import type { AdaptorContext, AdaptorOptions } from '../adaptor'
 import { Adaptor } from '../adaptor'
 import { sendError, sendJson } from '../http'
-import { transformRequest } from './request'
-import { transformResponse } from './response'
+import { RequestTransformer } from './request'
+import { ResponseTransformer } from './response'
 import { StreamTransformer } from './stream'
 import type { OAI } from './types'
 
@@ -20,7 +20,7 @@ export class OpenAICompletionsAdaptor extends Adaptor {
   }
 
   async handle({ res, anthropic }: AdaptorContext) {
-    const openaiReq = transformRequest(anthropic)
+    const openaiReq = new RequestTransformer(anthropic, this.reasoning).transform()
 
     const upstream = await fetch(this.baseUrl, {
       method: 'POST',
@@ -46,7 +46,7 @@ export class OpenAICompletionsAdaptor extends Adaptor {
       res.end()
     } else {
       const openaiResp = (await upstream.json()) as OAI.Response
-      sendJson(res, 200, transformResponse(openaiResp, anthropic.model))
+      sendJson(res, 200, new ResponseTransformer(openaiResp, anthropic.model).transform())
     }
   }
 }

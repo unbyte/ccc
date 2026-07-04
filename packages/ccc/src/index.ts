@@ -21,16 +21,18 @@ async function run(config: Config, _args: string[]) {
     if (config.transform) {
       // Spin up a local server translating Claude Code's requests to the
       // configured upstream, and hand its URL to Claude Code.
+      const { transform } = config
       const server = TransformServer.create({
         api: config.api,
         apiKey: config.apiKey,
-        transform: config.transform,
+        type: transform.type,
+        reasoning: transform.reasoning,
       })
       const { url, close } = await server.listen()
       closeServer = close
       env.ANTHROPIC_BASE_URL = url
       env.ANTHROPIC_AUTH_TOKEN = 'no-auth'
-      console.log('🔀 transform:', config.transform, '->', url)
+      console.log('🔀 transform:', transform.type, '->', url)
     } else {
       env.ANTHROPIC_BASE_URL = config.api
       env.ANTHROPIC_AUTH_TOKEN = config.apiKey || 'no-auth'

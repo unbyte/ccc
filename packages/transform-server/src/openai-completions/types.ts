@@ -30,9 +30,12 @@ export namespace OAI {
     tools?: Tool[]
     tool_choice?: unknown
     max_tokens?: number
+    // o-series models reject max_tokens and require max_completion_tokens.
+    max_completion_tokens?: number
     temperature?: number
     top_p?: number
     stop?: string[]
+    reasoning_effort?: string
     stream?: boolean
     stream_options?: { include_usage: boolean }
   }
@@ -41,31 +44,43 @@ export namespace OAI {
     prompt_tokens?: number
     completion_tokens?: number
     prompt_tokens_details?: { cached_tokens?: number }
-    // DeepSeek-style cache accounting
+    // Anthropic-style cache fields some compatible servers return directly.
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+    // DeepSeek-style cache hit accounting.
     prompt_cache_hit_tokens?: number
-    prompt_cache_miss_tokens?: number
+  }
+
+  // A non-streaming assistant message may carry text either as a plain string or
+  // as content parts (text / output_text / refusal), plus a message-level refusal.
+  export interface ResponseMessage {
+    content?: string | Array<{ type?: string; text?: string; refusal?: string }> | null
+    reasoning_content?: string
+    refusal?: string
+    tool_calls?: ToolCall[]
+    // Legacy single-call shape from older / proxied backends.
+    function_call?: { id?: string; name?: string; arguments?: unknown }
   }
 
   export interface Response {
     id?: string
-    model?: string
-    choices?: Array<{ message?: Message; finish_reason?: string }>
+    choices?: Array<{ message?: ResponseMessage; finish_reason?: string }>
     usage?: Usage
   }
 
   export interface StreamToolCall {
     index: number
     id?: string
-    type?: string
     function?: { name?: string; arguments?: string }
   }
 
   export interface StreamChunk {
-    id?: string
     choices?: Array<{
       delta?: {
         content?: string | null
         reasoning_content?: string | null
+        // OpenRouter / Kimi use `reasoning`; DeepSeek uses `reasoning_content`.
+        reasoning?: string | null
         tool_calls?: StreamToolCall[]
       }
       finish_reason?: string | null

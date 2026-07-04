@@ -36,7 +36,19 @@ const ConfigSchema = v.object({
   apiKey: v.optional(v.string()),
   // When set, `api` is treated as an upstream of the given API shape and a
   // local proxy translates Claude Code's requests to/from it.
-  transform: v.optional(v.picklist(['openai-completions'])),
+  transform: v.optional(
+    v.object({
+      type: v.picklist(['openai-completions']),
+      reasoning: v.optional(
+        v.object({
+          preserveContent: v.optional(v.boolean()),
+          // model id -> (Claude effort level -> upstream reasoning_effort token). A
+          // model not listed here is treated as not supporting reasoning.
+          effortMapping: v.optional(v.record(v.string(), v.record(EffortLevelSchema, v.string()))),
+        }),
+      ),
+    }),
+  ),
   default: v.optional(v.boolean()),
   args: v.optional(v.array(v.string())),
   env: v.optional(v.record(v.string(), v.string())),

@@ -13,9 +13,21 @@ function streamOf(...parts: Uint8Array[]) {
   })
 }
 
+function erroringStreamOf(...parts: Uint8Array[]) {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(part)
+      controller.error(new Error('boom'))
+    },
+  })
+}
+
 function parseEvent(block: string) {
   const [eventLine, dataLine] = block.trimEnd().split('\n')
-  return { event: eventLine.slice('event: '.length), data: JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown> }
+  return {
+    event: eventLine.slice('event: '.length),
+    data: JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>,
+  }
 }
 
 // Feed a raw SSE body through the transformer and collect the Anthropic events
@@ -29,7 +41,9 @@ async function run(body: ReadableStream<Uint8Array> | null) {
 
 // Encode parsed chunks as an OpenAI SSE body (with a trailing [DONE]).
 function collect(chunks: OAI.StreamChunk[]) {
-  return run(streamOf(...chunks.map((c) => enc(`data: ${JSON.stringify(c)}\n\n`)), enc('data: [DONE]\n\n')))
+  return run(
+    streamOf(...chunks.map((c) => enc(`data: ${JSON.stringify(c)}\n\n`)), enc('data: [DONE]\n\n')),
+  )
 }
 
 function textOf(events: { event: string; data: Record<string, unknown> }[]) {
@@ -42,7 +56,7 @@ function textOf(events: { event: string; data: Record<string, unknown> }[]) {
 }
 
 describe('StreamTransformer', () => {
-  it('emits a well-formed text stream', async () => {
+  it('emits a well-formed text stream with a single message_delta', async () => {
     const events = await collect([
       { choices: [{ delta: { content: 'Hel' } }] },
       { choices: [{ delta: { content: 'lo' } }] },
@@ -57,12 +71,15 @@ describe('StreamTransformer', () => {
       'content_block_delta',
       'content_block_stop',
       'message_delta',
-      'message_delta',
       'message_stop',
     ])
     expect(events[1].data).toMatchObject({ index: 0, content_block: { type: 'text' } })
     expect(events[2].data).toMatchObject({ index: 0, delta: { type: 'text_delta', text: 'Hel' } })
-    expect(events[5].data).toMatchObject({ delta: { stop_reason: 'end_turn' } })
+    // The single message_delta carries the stop reason and the tail-chunk usage.
+    expect(events[5].data).toMatchObject({
+      delta: { stop_reason: 'end_turn' },
+      usage: { input_tokens: 3, output_tokens: 2 },
+    })
   })
 
   it('transitions from thinking to text with distinct block indices', async () => {
@@ -75,29 +92,89 @@ describe('StreamTransformer', () => {
     expect(starts).toHaveLength(2)
     expect(starts[0].data).toMatchObject({ index: 0, content_block: { type: 'thinking' } })
     expect(starts[1].data).toMatchObject({ index: 1, content_block: { type: 'text' } })
-    // thinking block (0) is closed before the text block (1) opens.
     const order = events.map((e) => e.event)
-    expect(order.indexOf('content_block_stop')).toBeLessThan(order.lastIndexOf('content_block_start'))
+    expect(order.indexOf('content_block_stop')).toBeLessThan(
+      order.lastIndexOf('content_block_start'),
+    )
+  })
+
+  it('accepts the `reasoning` alias for reasoning_content', async () => {
+    const events = await collect([
+      { choices: [{ delta: { reasoning: 'hmm' } }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ])
+    const start = events.find((e) => e.event === 'content_block_start')
+    expect(start?.data).toMatchObject({ content_block: { type: 'thinking' } })
+    const delta = events.find((e) => e.event === 'content_block_delta')
+    expect(delta?.data).toMatchObject({ delta: { type: 'thinking_delta', thinking: 'hmm' } })
   })
 
   it('streams tool calls: first chunk opens, later chunks append args', async () => {
     const events = await collect([
-      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '' } }] } }] },
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search', arguments: '' } }],
+            },
+          },
+        ],
+      },
       { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"q":' } }] } }] },
       { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"x"}' } }] } }] },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
     ])
     const start = events.find((e) => e.event === 'content_block_start')
-    expect(start?.data).toMatchObject({ index: 0, content_block: { type: 'tool_use', id: 'call_1', name: 'search' } })
+    expect(start?.data).toMatchObject({
+      index: 0,
+      content_block: { type: 'tool_use', id: 'call_1', name: 'search' },
+    })
     const deltas = events.filter((e) => e.event === 'content_block_delta')
-    expect(deltas.map((d) => (d.data.delta as { partial_json: string }).partial_json)).toEqual(['{"q":', '"x"}'])
-    expect(events.find((e) => e.event === 'message_delta')?.data).toMatchObject({ delta: { stop_reason: 'tool_use' } })
+    expect(deltas.map((d) => (d.data.delta as { partial_json: string }).partial_json)).toEqual([
+      '{"q":',
+      '"x"}',
+    ])
+    expect(events.find((e) => e.event === 'message_delta')?.data).toMatchObject({
+      delta: { stop_reason: 'tool_use' },
+    })
+  })
+
+  it('buffers tool args that arrive before the id/name', async () => {
+    const events = await collect([
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"a":' } }] } }] },
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'c', function: { name: 'n', arguments: '1}' } }],
+            },
+          },
+        ],
+      },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ])
+    const start = events.find((e) => e.event === 'content_block_start')
+    expect(start?.data).toMatchObject({ content_block: { type: 'tool_use', id: 'c', name: 'n' } })
+    const deltas = events.filter((e) => e.event === 'content_block_delta')
+    // The buffered fragment is flushed at start, then the trailing fragment follows.
+    expect(deltas.map((d) => (d.data.delta as { partial_json: string }).partial_json)).toEqual([
+      '{"a":',
+      '1}',
+    ])
   })
 
   it('keeps a text block and following tool call at contiguous indices', async () => {
     const events = await collect([
       { choices: [{ delta: { content: 'hi' } }] },
-      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c', function: { name: 'n', arguments: '{}' } }] } }] },
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 'c', function: { name: 'n', arguments: '{}' } }],
+            },
+          },
+        ],
+      },
       { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
     ])
     const starts = events.filter((e) => e.event === 'content_block_start')
@@ -108,15 +185,16 @@ describe('StreamTransformer', () => {
   it('closes the message at EOF when the upstream never sent finish_reason', async () => {
     const events = await collect([{ choices: [{ delta: { content: 'partial' } }] }])
     expect(events.at(-1)?.event).toBe('message_stop')
-    expect(events.some((e) => e.event === 'message_delta' && (e.data.delta as { stop_reason?: string }).stop_reason === 'end_turn')).toBe(
-      true,
-    )
+    const delta = events.find((e) => e.event === 'message_delta')
+    expect((delta?.data.delta as { stop_reason?: string }).stop_reason).toBe('end_turn')
   })
 })
 
 describe('consume (SSE framing)', () => {
   it('reassembles a data line split across chunk boundaries', async () => {
-    const events = await run(streamOf(enc('data: {"choi'), enc('ces":[{"delta":{"content":"hi"}}]}\n\n')))
+    const events = await run(
+      streamOf(enc('data: {"choi'), enc('ces":[{"delta":{"content":"hi"}}]}\n\n')),
+    )
     expect(textOf(events)).toBe('hi')
   })
 
@@ -142,12 +220,23 @@ describe('consume (SSE framing)', () => {
   })
 
   it('ignores a malformed data line and resyncs on the next', async () => {
-    const events = await run(streamOf(enc('data: {bad}\n\n'), enc('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n')))
+    const events = await run(
+      streamOf(enc('data: {bad}\n\n'), enc('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n')),
+    )
     expect(textOf(events)).toBe('ok')
   })
 
   it('flushes an empty message when there is no body', async () => {
     const events = await run(null)
     expect(events.map((e) => e.event)).toEqual(['message_start', 'message_delta', 'message_stop'])
+  })
+
+  it('emits an error event and no success terminals when the upstream stream errors', async () => {
+    const events = await run(
+      erroringStreamOf(enc('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n')),
+    )
+    expect(events.some((e) => e.event === 'error')).toBe(true)
+    expect(events.some((e) => e.event === 'message_stop')).toBe(false)
+    expect(events.some((e) => e.event === 'message_delta')).toBe(false)
   })
 })

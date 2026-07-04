@@ -42,6 +42,8 @@ export namespace Ant {
     temperature?: number
     top_p?: number
     stop_sequences?: string[]
+    thinking?: { type?: string; budget_tokens?: number }
+    output_config?: { effort?: string }
     stream?: boolean
   }
 
@@ -77,7 +79,9 @@ export namespace Ant {
 export function systemText(system: unknown) {
   if (typeof system === 'string') return system
   if (Array.isArray(system)) {
-    return system.map((block) => (isObject(block) && typeof block.text === 'string' ? block.text : '')).join('')
+    return system
+      .map((block) => (isObject(block) && typeof block.text === 'string' ? block.text : ''))
+      .join('')
   }
   return ''
 }
@@ -85,24 +89,32 @@ export function systemText(system: unknown) {
 /** Message `content`: string OR [block] -> [block] (a bare string becomes one text block). */
 export function contentBlocks(content: unknown): Ant.ContentBlock[] {
   if (typeof content === 'string') return [{ type: 'text', text: content }]
-  if (Array.isArray(content)) return content.filter((block) => isObject(block) && typeof block.type === 'string') as Ant.ContentBlock[]
+  if (Array.isArray(content))
+    return content.filter(
+      (block) => isObject(block) && typeof block.type === 'string',
+    ) as Ant.ContentBlock[]
   return []
 }
 
-/** A tool_result's `content`: string, or array whose text blocks are concatenated. */
-export function toolResultText(content: unknown) {
+/**
+ * A tool_result's `content` -> a string for the OpenAI `tool` message. An all-text
+ * array is concatenated (the clean common case); anything with non-text blocks
+ * (images, structured payloads) or a bare object is preserved as JSON rather than
+ * dropped, so nothing the model needs is silently lost.
+ */
+export function toolResultText(content: unknown): string {
   if (content == null) return ''
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
-    return content
-      .map((block) => {
-        if (typeof block === 'string') return block
-        if (isObject(block) && typeof block.text === 'string') return block.text
-        return ''
-      })
-      .join('')
+    let text = ''
+    for (const block of content) {
+      if (typeof block === 'string') text += block
+      else if (isObject(block) && typeof block.text === 'string') text += block.text
+      else return JSON.stringify(content)
+    }
+    return text
   }
-  return ''
+  return JSON.stringify(content)
 }
 
 /** `tool_use.input` (object) -> `tool_calls.function.arguments` (stringified JSON). */

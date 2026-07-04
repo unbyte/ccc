@@ -12,7 +12,7 @@ import { OpenAICompletionsAdaptor } from './openai-completions'
 const HOST = '127.0.0.1'
 
 export interface TransformServerOptions extends AdaptorOptions {
-  transform: 'openai-completions'
+  type: 'openai-completions'
 }
 
 export interface TransformServerHandle {
@@ -24,11 +24,11 @@ export interface TransformServerHandle {
 
 export class TransformServer {
   static create(options: TransformServerOptions): TransformServer {
-    switch (options.transform) {
+    switch (options.type) {
       case 'openai-completions':
         return new TransformServer(new OpenAICompletionsAdaptor(options))
       default:
-        throw new Error(`Unsupported transform: ${options.transform}`)
+        throw new Error(`Unsupported transform: ${options.type}`)
     }
   }
 
