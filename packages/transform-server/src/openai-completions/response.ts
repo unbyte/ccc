@@ -1,5 +1,4 @@
-import type { Ant } from '../anthropic'
-import { genId, parseArguments } from '../anthropic'
+import { type Ant, genId } from '../anthropic-message'
 import type { OAI } from './types'
 
 // OpenAI Chat Completions response -> Anthropic Messages response (non-streaming).
@@ -61,7 +60,7 @@ export class ResponseTransformer {
 
   // Returns whether any tool_use block was produced. Falls back to the legacy
   // single-call `function_call` shape only when there were no modern tool_calls.
-  private appendToolUse(message: OAI.ResponseMessage | undefined): boolean {
+  private appendToolUse(message: OAI.ResponseMessage | undefined) {
     const before = this.content.length
     for (const call of message?.tool_calls ?? []) {
       this.content.push({
@@ -125,5 +124,16 @@ export function mapUsage(usage: OAI.Usage | undefined): Ant.Usage {
     output_tokens: usage?.completion_tokens ?? 0,
     cache_read_input_tokens: cacheRead,
     cache_creation_input_tokens: cacheCreation,
+  }
+}
+
+// OpenAI `tool_calls.function.arguments` (JSON string) -> Anthropic `tool_use.input`.
+// `unknown` (not the `any` JSON.parse yields) so callers must narrow before use.
+function parseArguments(args: string | undefined): unknown {
+  if (!args) return {}
+  try {
+    return JSON.parse(args)
+  } catch {
+    return {}
   }
 }

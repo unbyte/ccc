@@ -1,6 +1,5 @@
 import type { ReasoningOptions } from '../adaptor'
-import type { Ant } from '../anthropic'
-import { contentBlocks, stringifyInput, toolResultText } from '../anthropic'
+import { type Ant, toolResultText } from '../anthropic-message'
 import type { OAI } from './types'
 
 // Anthropic Messages request -> OpenAI Chat Completions request. One-shot: build a
@@ -16,7 +15,7 @@ export class RequestTransformer {
   transform(): OAI.Request {
     const req = this.req
     this.appendSystem()
-    for (const message of req.messages ?? []) this.appendMessage(message)
+    for (const message of req.messages) this.appendMessage(message)
 
     const out: OAI.Request = { model: req.model, messages: this.messages }
 
@@ -54,7 +53,7 @@ export class RequestTransformer {
   }
 
   private appendMessage(message: Ant.Message) {
-    const blocks = contentBlocks(message.content)
+    const blocks = message.content
     if (message.role === 'assistant') this.appendAssistant(blocks)
     // Anthropic only sends user/assistant; tool results ride inside user turns.
     else this.appendUser(blocks)
@@ -150,7 +149,7 @@ export class RequestTransformer {
   // Look up the upstream `reasoning_effort` token for this request's model and
   // effort level. A model absent from the map doesn't support reasoning (nothing is
   // sent); a supported model with an unmapped level likewise sends nothing.
-  private resolveReasoningEffort(): string | undefined {
+  private resolveReasoningEffort() {
     const perModel = this.reasoning.effortMapping?.[this.req.model]
     if (!perModel) return undefined
     const level = this.resolveEffortLevel()
@@ -159,7 +158,7 @@ export class RequestTransformer {
 
   // Resolve a Claude effort level. output_config.effort wins; otherwise fall back
   // to thinking.type + budget_tokens (adaptive -> xhigh, enabled -> low/medium/high).
-  private resolveEffortLevel(): string | undefined {
+  private resolveEffortLevel() {
     const effort = this.req.output_config?.effort
     if (typeof effort === 'string') return effort
 
@@ -189,17 +188,12 @@ function stripLeadingBillingHeader(text: string) {
   return text.slice(nl).replace(/^(\r\n|\r|\n){1,2}/, '')
 }
 
-// Anthropic `system` (string or [{text}]) -> a single leading OpenAI system message.
-function systemMessage(system: unknown): OAI.Message | null {
+// Normalized Anthropic `system` blocks -> a single leading OpenAI system message.
+function systemMessage(system: Ant.SystemBlock[]): OAI.Message | null {
   const parts: string[] = []
-  if (typeof system === 'string') {
-    const text = stripLeadingBillingHeader(system)
+  for (const block of system) {
+    const text = stripLeadingBillingHeader(block.text)
     if (text) parts.push(text)
-  } else if (Array.isArray(system)) {
-    for (const block of system) {
-      const text = typeof block?.text === 'string' ? stripLeadingBillingHeader(block.text) : ''
-      if (text) parts.push(text)
-    }
   }
   if (!parts.length) return null
   return { role: 'system', content: parts.join('\n') }
@@ -287,4 +281,16 @@ function isOpenAIOSeries(model: string) {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Anthropic `tool_use.input` (object) -> the stringified JSON that OpenAI's
+// `tool_calls.function.arguments` expects; a pre-stringified input passes through.
+function stringifyInput(input: unknown) {
+  if (input == null) return '{}'
+  if (typeof input === 'string') return input || '{}'
+  try {
+    return JSON.stringify(input)
+  } catch {
+    return '{}'
+  }
 }

@@ -1,5 +1,4 @@
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Ant } from './anthropic'
+import type { Ant, Responder } from './anthropic-message'
 
 export interface ReasoningOptions {
   /**
@@ -26,10 +25,9 @@ export interface AdaptorOptions {
 }
 
 export interface AdaptorContext {
-  req: IncomingMessage
-  res: ServerResponse
   /** Parsed Anthropic Messages request body. */
-  anthropic: Ant.Request
+  request: Ant.Request
+  responder: Responder
 }
 
 // Owns a single upstream API shape. The TransformServer handles the HTTP

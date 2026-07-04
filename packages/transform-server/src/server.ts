@@ -1,10 +1,8 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { text } from 'node:stream/consumers'
 import type { Adaptor, AdaptorOptions } from './adaptor'
-import type { Ant } from './anthropic'
-import { contentBlocks, systemText, toolResultText } from './anthropic'
-import { sendError, sendJson } from './http'
+import { type Ant, parseRequest, Responder, toolResultText } from './anthropic-message'
 import { OpenAICompletionsAdaptor } from './openai-completions'
 
 // Loopback only: the upstream key lives in this process and the server must
@@ -36,8 +34,9 @@ export class TransformServer {
 
   listen(): Promise<TransformServerHandle> {
     const server = createServer((req, res) => {
-      this.route(req, res).catch((error) => {
-        sendError(res, 500, error instanceof Error ? error.message : String(error))
+      const responder = new Responder(res)
+      this.route(req, responder).catch((error) => {
+        responder.error(500, error instanceof Error ? error.message : String(error))
       })
     })
 
@@ -58,48 +57,49 @@ export class TransformServer {
     })
   }
 
-  private async route(req: IncomingMessage, res: ServerResponse) {
+  private async route(req: IncomingMessage, responder: Responder) {
     const path = (req.url ?? '').split('?')[0]
     const method = req.method ?? 'GET'
 
     if (method === 'GET' && (path === '/' || path === '/health')) {
-      sendJson(res, 200, { status: 'ok' })
+      responder.json(200, { status: 'ok' })
       return
     }
 
     if (method !== 'POST') {
-      sendError(res, 404, `not found: ${method} ${path}`)
+      responder.error(404, `not found: ${method} ${path}`)
       return
     }
 
     const raw = await text(req)
-    let anthropic: Ant.Request
+    let request: Ant.Request
     try {
-      anthropic = JSON.parse(raw) as Ant.Request
+      request = parseRequest(JSON.parse(raw))
     } catch {
-      sendError(res, 400, 'request body is not valid JSON')
+      responder.error(400, 'request body is not valid JSON')
       return
     }
 
     if (path === '/v1/messages/count_tokens') {
-      sendJson(res, 200, { input_tokens: estimateTokens(anthropic) })
+      responder.json(200, { input_tokens: estimateTokens(request) })
       return
     }
     if (path === '/v1/messages') {
-      await this.adaptor.handle({ req, res, anthropic })
+      await this.adaptor.handle({ request, responder })
       return
     }
 
-    sendError(res, 404, `not found: ${method} ${path}`)
+    responder.error(404, `not found: ${method} ${path}`)
   }
 }
 
 // Most OpenAI-compatible providers have no count_tokens endpoint, so estimate
 // locally (~4 chars per token) to feed Claude Code's context meter.
 function estimateTokens(req: Ant.Request) {
-  let chars = systemText(req.system).length
-  for (const message of req.messages ?? []) {
-    for (const block of contentBlocks(message.content)) {
+  let chars = 0
+  for (const block of req.system) chars += block.text.length
+  for (const message of req.messages) {
+    for (const block of message.content) {
       if (block.type === 'text') chars += (block.text ?? '').length
       else if (block.type === 'thinking') chars += (block.thinking ?? '').length
       else if (block.type === 'tool_result') chars += toolResultText(block.content).length

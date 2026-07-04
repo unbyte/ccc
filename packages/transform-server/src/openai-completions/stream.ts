@@ -1,5 +1,4 @@
-import type { Ant } from '../anthropic'
-import { genId } from '../anthropic'
+import { type Ant, genId } from '../anthropic-message'
 import { mapFinishReason, mapUsage } from './response'
 import type { OAI } from './types'
 

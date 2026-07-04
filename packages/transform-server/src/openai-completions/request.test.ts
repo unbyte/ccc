@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { ReasoningOptions } from '../adaptor'
-import type { Ant } from '../anthropic'
+import { type Ant, parseRequest } from '../anthropic-message'
 import { RequestTransformer } from './request'
 
-function transform(req: Ant.Request, reasoning?: ReasoningOptions) {
-  return new RequestTransformer(req, reasoning).transform()
+// Fixtures use the raw wire shapes Claude Code sends; route them through
+// parseRequest so the tests exercise the real parse -> transform pipeline.
+function transform(req: unknown, reasoning?: ReasoningOptions) {
+  return new RequestTransformer(parseRequest(req), reasoning).transform()
 }
 
 describe('RequestTransformer', () => {
@@ -234,7 +236,7 @@ describe('RequestTransformer', () => {
   })
 
   it('maps effort to reasoning_effort only for models present in the effortMapping', () => {
-    const req: Ant.Request = { model: 'gpt-5', messages: [], output_config: { effort: 'max' } }
+    const req = { model: 'gpt-5', messages: [], output_config: { effort: 'max' } }
     // No mapping at all -> nothing sent.
     expect(transform(req).reasoning_effort).toBeUndefined()
     // Model listed -> its per-level token is used.
@@ -248,7 +250,7 @@ describe('RequestTransformer', () => {
   })
 
   it('derives the effort level from thinking budget', () => {
-    const req: Ant.Request = {
+    const req = {
       model: 'm',
       messages: [],
       thinking: { type: 'enabled', budget_tokens: 20000 },
@@ -257,7 +259,7 @@ describe('RequestTransformer', () => {
   })
 
   it('sends nothing when the resolved level is not mapped for the model', () => {
-    const req: Ant.Request = { model: 'm', messages: [], output_config: { effort: 'medium' } }
+    const req = { model: 'm', messages: [], output_config: { effort: 'medium' } }
     expect(
       transform(req, { effortMapping: { m: { low: 'low', high: 'high' } } }).reasoning_effort,
     ).toBeUndefined()
