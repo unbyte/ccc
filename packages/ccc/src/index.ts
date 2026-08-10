@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import type { Config } from './config'
 import { load, pick } from './config-manager'
-
-const CONFIG_FILE = join(homedir(), '.ccc', 'config.json')
+import { configPath } from './paths'
 
 function run(config: Config, _args: string[]) {
   const args = [..._args]
@@ -66,7 +63,7 @@ function run(config: Config, _args: string[]) {
 
 async function main() {
   const args = process.argv.slice(2)
-  const list = await load(CONFIG_FILE)
+  const list = await load(configPath())
 
   let config: Config | undefined
   let runArgs: string[] = []

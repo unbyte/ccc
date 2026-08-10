@@ -21,7 +21,7 @@ async function exists(path: string) {
 export async function load(configFile: string) {
   let content: string
   try {
-    await mkdir(dirname(configFile), { recursive: true })
+    await mkdir(dirname(configFile), { recursive: true, mode: 0o700 })
     if (!(await exists(configFile))) {
       await writeFile(configFile, '[]', 'utf-8')
     }

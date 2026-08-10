@@ -14,7 +14,7 @@
 npm i -g @unbyte/ccc
 ```
 
-Create `~/.ccc/config.json`:
+Config: `$XDG_CONFIG_HOME/ccc/config.json`, or `~/.config/ccc/config.json` if unset (on all platforms).
 
 ```jsonc
 [

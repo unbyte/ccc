@@ -19,7 +19,9 @@ describe('load', () => {
   })
 
   it('loads a valid config file', async () => {
-    vol.fromJSON({ '/home/config.json': JSON.stringify([{ id: 'test', api: 'https://api.example.com' }]) })
+    vol.fromJSON({
+      '/home/config.json': JSON.stringify([{ id: 'test', api: 'https://api.example.com' }]),
+    })
     const result = await load('/home/config.json')
     expect(result).toHaveLength(1)
   })
