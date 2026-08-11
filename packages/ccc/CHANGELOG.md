@@ -1,5 +1,11 @@
 # @unbyte/ccc
 
+## 0.0.4
+
+### Patch Changes
+
+- bf1493e: feat: respect XDG_CONFIG_HOME
+
 ## 0.0.3
 
 ### Patch Changes
