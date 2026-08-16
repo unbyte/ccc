@@ -2,8 +2,21 @@ import * as v from 'valibot'
 
 const EffortLevelSchema = v.picklist(['low', 'medium', 'high', 'xhigh', 'max'])
 
+const CodexTransformSchema = v.object({
+  type: v.literal('codex'),
+  credential: v.optional(
+    v.object({
+      accessToken: v.pipe(v.string(), v.nonEmpty()),
+      accountId: v.optional(v.pipe(v.string(), v.nonEmpty())),
+    }),
+  ),
+})
+
+const TransformSchema = v.variant('type', [CodexTransformSchema])
+
 const ConfigSchema = v.object({
   id: v.string(),
+  transform: v.optional(TransformSchema),
   models: v.optional(
     v.union([
       v.object({
@@ -46,6 +59,7 @@ const ConfigListFileSchema = v.pipe(v.string(), v.parseJson(), ConfigListSchema)
 
 export type Config = v.InferOutput<typeof ConfigSchema>
 export type ConfigList = v.InferOutput<typeof ConfigListSchema>
+export type TransformConfig = v.InferOutput<typeof TransformSchema>
 
 export function parse(raw: string) {
   const parsed = v.safeParse(ConfigListFileSchema, raw)

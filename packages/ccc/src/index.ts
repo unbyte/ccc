@@ -1,17 +1,35 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import type { Config } from './config'
+import { createServer, type TransformServer } from '../../transform-server/src'
+import type { Config, TransformConfig } from './config'
 import { load, pick } from './config-manager'
 import { configPath } from './paths'
 
-function run(config: Config, _args: string[]) {
+function createTransformServer(transform: TransformConfig, models: Config['models']) {
+  const modelIds = [
+    ...new Set(Object.values(models ?? {}).filter((model): model is string => model !== undefined)),
+  ]
+  return createServer({
+    adaptor: {
+      ...transform,
+      models: modelIds,
+    },
+  })
+}
+
+async function run(config: Config, _args: string[]) {
   const args = [..._args]
   const env: Record<string, string | undefined> = {
     ...process.env,
   }
 
-  if (config.api) {
+  let transformServer: TransformServer | undefined
+  if (config.transform) {
+    transformServer = await createTransformServer(config.transform, config.models)
+    env.ANTHROPIC_BASE_URL = transformServer.url
+    env.ANTHROPIC_AUTH_TOKEN = 'no-auth'
+  } else if (config.api) {
     env.ANTHROPIC_BASE_URL = config.api
     env.ANTHROPIC_AUTH_TOKEN = config.apiKey || 'no-auth'
   }
@@ -51,12 +69,14 @@ function run(config: Config, _args: string[]) {
     env,
     stdio: 'inherit',
   })
-    .on('error', (error) => {
+    .on('error', async (error) => {
+      await transformServer?.close()
       console.error('failed to start claude code:')
       console.error(error instanceof Error ? error.message : String(error))
       process.exit(1)
     })
-    .on('close', (code) => {
+    .on('close', async (code) => {
+      await transformServer?.close()
       process.exit(code ?? 0)
     })
 }
@@ -81,7 +101,7 @@ async function main() {
     runArgs = args
   }
 
-  run(config, runArgs)
+  await run(config, runArgs)
 }
 
 main().catch((error) => {

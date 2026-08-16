@@ -31,6 +31,11 @@ export interface ServerOptions {
   adaptor: ServerAdaptorOptions
 }
 
+export interface TransformServer {
+  readonly url: string
+  close(): Promise<void>
+}
+
 function isJsonContentType(request: IncomingMessage) {
   return (
     request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json'
@@ -123,7 +128,7 @@ function handleError(response: ServerResponse, error: unknown) {
   }
 }
 
-export async function createServer(options: ServerOptions) {
+export async function createServer(options: ServerOptions): Promise<TransformServer> {
   const server = createHttpServer()
   let adaptor: Adaptor
   switch (options.adaptor.type) {
@@ -172,5 +177,5 @@ export async function createServer(options: ServerOptions) {
     return closing
   }
 
-  return { port: address.port, close }
+  return { url: `http://${host}:${address.port}`, close }
 }
