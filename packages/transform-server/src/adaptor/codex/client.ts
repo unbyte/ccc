@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { OpenAIResponsesRequest } from '../../protocol/openai-responses'
 import { AdaptorError, anthropicErrorType } from '../shared/errors'
-import { type CodexCredential, loadCodexCredential } from './auth-file'
+import type { CodexCredential } from './auth-file'
 
 /** Per-request identity used for cache and replay isolation. */
 export interface CodexExecutionScope {
@@ -29,26 +29,25 @@ function codexSessionId(scope: CodexExecutionScope) {
 
 /** Fixed-endpoint Codex Responses client. */
 export class CodexClient {
-  constructor(private readonly credential?: CodexCredential) {}
+  constructor(private readonly credential: CodexCredential) {}
 
   async createResponse(
     request: OpenAIResponsesRequest,
     scope: CodexExecutionScope,
     signal: AbortSignal,
   ) {
-    const credential = this.credential ?? (await loadCodexCredential())
     const sessionId = codexSessionId(scope)
     const body: OpenAIResponsesRequest = { ...request, prompt_cache_key: sessionId }
     const headers = new Headers({
-      authorization: `Bearer ${credential.accessToken}`,
+      authorization: `Bearer ${this.credential.accessToken}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
       originator: codexCompatibilityProfile.originator,
       'user-agent': codexCompatibilityProfile.userAgent,
       'session-id': sessionId,
     })
-    if (credential.accountId !== undefined) {
-      headers.set('chatgpt-account-id', credential.accountId)
+    if (this.credential.accountId !== undefined) {
+      headers.set('chatgpt-account-id', this.credential.accountId)
     }
     const response = await fetch(codexCompatibilityProfile.responsesUrl, {
       method: 'POST',

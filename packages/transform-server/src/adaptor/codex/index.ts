@@ -1,9 +1,6 @@
 import { once } from 'node:events'
-import type { IncomingMessage, Server, ServerResponse } from 'node:http'
-import {
-  type AnthropicMessageRequest,
-  isAnthropicMessageRequest,
-} from '../../protocol/anthropic-messages'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { AnthropicMessageRequest } from '../../protocol/anthropic-messages'
 import type {
   OpenAIReasoningInputItem,
   OpenAIResponseOutputItem,
@@ -14,8 +11,8 @@ import {
   OpenAIResponseTransformer,
   transformAnthropicRequest,
 } from '../../transformer/openai-responses'
-import { readJsonBody } from '../shared/body'
-import { AdaptorError, errorEnvelope, normalizeAdaptorError, writeJson } from '../shared/errors'
+import type { Adaptor } from '..'
+import { AdaptorError, writeJson } from '../shared/errors'
 import { encodeSse, parseSse } from '../shared/sse'
 import { type CodexCredential, loadCodexCredential } from './auth-file'
 import { CodexClient, type CodexExecutionScope } from './client'
@@ -29,11 +26,10 @@ import {
 
 export type { CodexCredential } from './auth-file'
 
-const requestBodyLimit = 32 * 1024 * 1024
 const upstreamEventLimit = 50 * 1024 * 1024
 
 /** Codex adaptor configuration. */
-export interface RegisterCodexAdaptorOptions {
+export interface CodexAdaptorOptions {
   /** Model IDs exposed unchanged to Claude Code. */
   models: readonly string[]
   /** Explicit credential; defaults to the installed Codex CLI credential. */
@@ -66,12 +62,6 @@ function executionScope(
 async function writeWithBackpressure(response: ServerResponse, chunk: string) {
   if (response.write(chunk)) return
   await once(response, 'drain')
-}
-
-function isJsonContentType(request: IncomingMessage) {
-  return (
-    request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json'
-  )
 }
 
 function replayItems(items: OpenAIResponseOutputItem[]): ReasoningReplayItem[] {
@@ -139,125 +129,94 @@ async function consumeUpstream(
   await transformer.finish()
 }
 
-/** Attaches the standalone Codex adaptor after validating startup credentials and models. */
-export async function registerCodexAdaptor(server: Server, options: RegisterCodexAdaptorOptions) {
-  const models = validateModels(options.models)
-  if (options.credential === undefined) await loadCodexCredential()
-  const client = new CodexClient(options.credential)
-  const replayStore = new ReasoningReplayStore()
-  const controllers = new Set<AbortController>()
+export class CodexAdaptor implements Adaptor {
+  private readonly replayStore = new ReasoningReplayStore()
+  private readonly controllers = new Set<AbortController>()
 
-  const listener = async (request: IncomingMessage, response: ServerResponse) => {
-    let streamStarted = false
+  private constructor(
+    private readonly modelIds: string[],
+    private readonly client: CodexClient,
+  ) {}
+
+  static async create(options: CodexAdaptorOptions) {
+    const modelIds = validateModels(options.models)
+    const credential = options.credential ?? (await loadCodexCredential())
+    return new CodexAdaptor(modelIds, new CodexClient(credential))
+  }
+
+  models() {
+    return createModelList(this.modelIds)
+  }
+
+  countTokens(request: AnthropicMessageRequest) {
+    const transformed = this.transformRequest(request)
+    return { input_tokens: countTokens(transformed.request, request) }
+  }
+
+  async messages(
+    incoming: IncomingMessage,
+    response: ServerResponse,
+    request: AnthropicMessageRequest,
+  ) {
+    const transformed = this.transformRequest(request)
+    const scope = executionScope(incoming, request)
+    transformed.request.input = this.replayStore.replay(scope, transformed.request.input)
+    const controller = new AbortController()
+    this.controllers.add(controller)
+    incoming.once('aborted', () => controller.abort())
+    response.once('close', () => {
+      if (!response.writableEnded) controller.abort()
+    })
+
     try {
-      const url = new URL(request.url ?? '/', 'http://localhost')
-      const knownPath = ['/v1/messages', '/v1/messages/count_tokens', '/v1/models'].includes(
-        url.pathname,
+      const upstream = await this.client.createResponse(
+        transformed.request,
+        scope,
+        controller.signal,
       )
-      if (!knownPath) {
-        writeJson(response, 404, errorEnvelope('not_found_error', 'Route not found'))
-        return
-      }
-      const expectedMethod = url.pathname === '/v1/models' ? 'GET' : 'POST'
-      if (request.method !== expectedMethod) {
-        response.setHeader('allow', expectedMethod)
-        writeJson(response, 405, errorEnvelope('invalid_request_error', 'Method not allowed'))
-        return
-      }
-      if (url.pathname === '/v1/models') {
-        writeJson(response, 200, createModelList(models))
-        return
-      }
-      if (!isJsonContentType(request)) {
-        throw new AdaptorError(
-          'Content-Type must be application/json',
-          415,
-          'invalid_request_error',
+      const transformer = new OpenAIResponseTransformer(transformed.context)
+      if (request.stream === true) {
+        response.statusCode = 200
+        response.setHeader('content-type', 'text/event-stream')
+        response.setHeader('cache-control', 'no-cache')
+        response.setHeader('connection', 'keep-alive')
+        transformer.on((event) => writeWithBackpressure(response, encodeSse(event)))
+        await consumeUpstream(
+          upstream,
+          transformer,
+          scope,
+          this.replayStore,
+          replayFingerprint(transformed.request.input),
         )
-      }
-      const decoded = await readJsonBody(request, requestBodyLimit)
-      if (!isAnthropicMessageRequest(decoded)) {
-        throw new AdaptorError(
-          'Request must include model, max_tokens, and valid messages',
-          400,
-          'invalid_request_error',
-        )
-      }
-      const body = decoded
-      if (!models.includes(body.model)) {
-        throw new AdaptorError(`Unknown model: ${body.model}`, 400, 'invalid_request_error')
-      }
-      const transformed = transformAnthropicRequest(body)
-      if (url.pathname === '/v1/messages/count_tokens') {
-        writeJson(response, 200, { input_tokens: countTokens(transformed.request, body) })
+        response.end()
         return
       }
 
-      const scope = executionScope(request, body)
-      transformed.request.input = replayStore.replay(scope, transformed.request.input)
-      const controller = new AbortController()
-      controllers.add(controller)
-      request.once('aborted', () => controller.abort())
-      response.once('close', () => {
-        if (!response.writableEnded) controller.abort()
-      })
-      try {
-        const upstream = await client.createResponse(transformed.request, scope, controller.signal)
-        const transformer = new OpenAIResponseTransformer(transformed.context)
-        if (body.stream === true) {
-          response.statusCode = 200
-          response.setHeader('content-type', 'text/event-stream')
-          response.setHeader('cache-control', 'no-cache')
-          response.setHeader('connection', 'keep-alive')
-          streamStarted = true
-          transformer.on((event) => writeWithBackpressure(response, encodeSse(event)))
-          await consumeUpstream(
-            upstream,
-            transformer,
-            scope,
-            replayStore,
-            replayFingerprint(transformed.request.input),
-          )
-          response.end()
-        } else {
-          const collector = new AnthropicMessageCollector()
-          transformer.on((event) => collector.push(event))
-          await consumeUpstream(
-            upstream,
-            transformer,
-            scope,
-            replayStore,
-            replayFingerprint(transformed.request.input),
-          )
-          writeJson(response, 200, collector.result())
-        }
-      } finally {
-        controllers.delete(controller)
-      }
-    } catch (error) {
-      const normalized = normalizeAdaptorError(error)
-      if (streamStarted && !response.writableEnded) {
-        await writeWithBackpressure(
-          response,
-          encodeSse(errorEnvelope(normalized.type, normalized.message)),
-        )
-        response.end()
-      } else if (!response.headersSent) {
-        writeJson(response, normalized.status, errorEnvelope(normalized.type, normalized.message))
-      } else if (!response.writableEnded) {
-        response.end()
-      }
+      const collector = new AnthropicMessageCollector()
+      transformer.on((event) => collector.push(event))
+      await consumeUpstream(
+        upstream,
+        transformer,
+        scope,
+        this.replayStore,
+        replayFingerprint(transformed.request.input),
+      )
+      writeJson(response, 200, collector.result())
+    } finally {
+      this.controllers.delete(controller)
     }
   }
 
-  server.on('request', listener)
-  let closed = false
-  return () => {
-    if (closed) return
-    closed = true
-    server.off('request', listener)
-    for (const controller of controllers) controller.abort()
-    controllers.clear()
-    replayStore.clear()
+  close() {
+    for (const controller of this.controllers) controller.abort()
+    this.controllers.clear()
+    this.replayStore.clear()
+  }
+
+  private transformRequest(request: AnthropicMessageRequest) {
+    if (!this.modelIds.includes(request.model)) {
+      throw new AdaptorError(`Unknown model: ${request.model}`, 400, 'invalid_request_error')
+    }
+    return transformAnthropicRequest(request)
   }
 }
