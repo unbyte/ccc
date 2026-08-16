@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "name": "@internal/transform-server",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "js-tiktoken": "^1.0.21"
+  }
+}
